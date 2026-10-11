@@ -24,31 +24,32 @@ The goal is to build a foundation for workflows that can eventually be inspected
 The current implementation follows this pipeline:
 
 ```text
-                    demo.webm
-                        |
-             +----------+----------+
-             |                     |
-       Video processing      Audio extraction
-             |                     |
-      OpenCV screenshots          FFmpeg
-             |                     |
-             |                audio.mp3
-             |                     |
-             |               Whisper API
-             |                     |
-             |             Timestamped transcript
-             |                     |
-             +----------+----------+
-                        |
-                  GPT-4.1 Vision
-                        |
-             Workflow reconstruction
-                        |
-              Evidence validation
-                        |
-                workflow.json
-                        |
-                 Human review
+                          demo.webm
+                       Input: Video
+                            |
+                +-----------+-----------+
+                |                       |
+         Video processing        Audio extraction
+                |                       |
+             OpenCV                  FFmpeg
+       (Capture video frames)   (Extract audio track)
+                |                       |
+              Frames                 audio.mp3
+                |                       |
+                |                   Whisper API
+                |                (Speech-to-text)
+                |                       |
+                |               Timestamped transcript
+                |                       |
+                + - - - - - - - - - - - +
+                            |
+                    GPT-4.1 Vision API
+              (Analyze frames and transcript)
+                            |
+                      workflow.json
+                            |
+                       Human review
+                 (Manually verify the JSON)
 ```
 
 The main script is `video_to_workflow.py`. It coordinates the extraction, transcription, reconstruction, and JSON-generation stages.
