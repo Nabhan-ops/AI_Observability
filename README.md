@@ -9,20 +9,41 @@ AI Observability is a Python project that reconstructs computer workflows from s
 ### Current pipeline
 
 ```text
-demo.webm
-    |
-    +---- Video ----> OpenCV ----> Sampled screenshots
-    |
-    +---- Audio ----> FFmpeg ----> Whisper transcription
-                                      |
-                                      v
-                         GPT-4.1 vision analysis
-                                      |
-                                      v
-                              workflow.json
-                                      |
-                                      v
-                          Evidence enrichment
+
+                         demo.webm
+                             |
+                +------------+------------+
+                |                         |
+                v                         v
+         Video processing          Audio extraction
+                |                         |
+                v                         v
+             OpenCV                    FFmpeg
+       (Extract video frames)     (Extract audio track)
+                |                         |
+                v                         v
+              Frames                  audio.mp3
+                |                         |
+                |                         v
+                |                  Whisper API
+                |                (Speech-to-text)
+                |                         |
+                |                         v
+                |                 Transcription
+                |                 (with timestamps)
+                |                         |
+                +------------+------------+
+                             |
+                             v
+                  GPT-4.1 vision analysis
+                 (Frames + transcription)
+                             |
+                             v
+                       workflow.json
+                             |
+                             v
+                    Evidence enrichment
+
 ```
 
 ### Implemented features
@@ -128,25 +149,21 @@ The second stage converts a reconstructed workflow into a Python script using Pl
 ### Browser automation pipeline
 
 ```text
-output/workflow.json
-        |
-        v
-workflow_to_playwright.py
-        |
-        v
-OpenAI GPT-4.1
-        |
-        v
-Generated Python source
-        |
-        v
-output/generated_playwright.py
-        |
-        v
-Human review
-        |
-        v
-Manual, supervised browser execution
+
+                       workflow.json
+                            |
+                            v
+                workflow_to_playwright.py
+                            |
+                            v
+                   OpenAI GPT-4.1 API
+                            |
+                            v
+            Generate Playwright script on the fly
+                            |
+                            v
+                  Browser automation
+
 ```
 
 ### How it works
