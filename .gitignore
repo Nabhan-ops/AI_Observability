@@ -123,6 +123,7 @@ docs/_build/
 
 # Generated media
 *.webm
+!demo.webm
 *.mp4
 *.mp3
 *.wav
