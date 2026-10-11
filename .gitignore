@@ -1,0 +1,29 @@
+# API keys and secrets
+.env
+.env.*
+!.env.example
+
+# Python virtual environments
+.venv/
+venv/
+AI_Observability/
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Generated media
+*.webm
+*.mp4
+*.mp3
+*.wav
+
+# Generated output
+output/
+
+# IDE files
+.idea/
+.vscode/
+
+# Logs
+*.log
