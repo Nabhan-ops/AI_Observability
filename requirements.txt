@@ -2,3 +2,4 @@ openai
 opencv-python
 python-dotenv
 playwright
+psycopg[binary]

@@ -1,250 +1,372 @@
 # AI Observability
 
-**Turn screen recordings and spoken instructions into structured workflows, then generate reviewable browser automation code.**
+**Turn recorded GUI tasks into structured workflows, retrieve similar workflows using vector search, and generate reviewable Playwright automation.**
 
-## 1. What We Have Now
+AI Observability is an experimental Python project that combines video analysis, speech transcription, LLM-based workflow reconstruction, PostgreSQL with pgvector, retrieval-augmented generation (RAG), and browser automation.
 
-AI Observability is a Python project that reconstructs computer workflows from screen recordings by combining visual evidence and spoken instructions.
-
-### Current pipeline
+## 1. Architecture
 
 ```text
-
-                         demo.webm
-                             |
-                +------------+------------+
-                |                         |
-                v                         v
-         Video processing          Audio extraction
-                |                         |
-                v                         v
-             OpenCV                    FFmpeg
-       (Extract video frames)     (Extract audio track)
-                |                         |
-                v                         v
-              Frames                  audio.mp3
-                |                         |
-                |                         v
-                |                  Whisper API
-                |                (Speech-to-text)
-                |                         |
-                |                         v
-                |                 Transcription
-                |                 (with timestamps)
-                |                         |
-                +------------+------------+
-                             |
-                             v
-                  GPT-4.1 vision analysis
-                 (Frames + transcription)
-                             |
-                             v
-                       workflow.json
-                             |
-                             v
-                    Evidence enrichment
-
+Screen recording (demo.webm)
+        |
+        v
+Video frames + extracted audio
+        |                   |
+        v                   v
+OpenCV                FFmpeg + Whisper API
+        |                   |
+        +---------+---------+
+                  |
+                  v
+       GPT-4.1 workflow analysis
+                  |
+                  v
+       output/workflow.json
+                  |
+                  v
+      Ingest workflow into PostgreSQL
+                  |
+                  v
+       OpenAI text-embedding-3-small
+                  |
+                  v
+     PostgreSQL + pgvector database
+       /                         \
+      v                           v
+Workflow-level records      Individual step records
+      \                           /
+       +------------+-------------+
+                    |
+                    v
+       Retrieve a similar workflow
+                    |
+                    v
+       Adapt workflow with GPT-4.1
+                    |
+                    v
+       Generate Playwright Python code
+                    |
+                    v
+         Human review and testing
 ```
 
-### Implemented features
+## 2. Features
 
-- **Video processing:** Loads `demo.webm` from the project root and reads its duration.
-- **Screenshot extraction:** Uses OpenCV to capture frames at three-second intervals, with a maximum of 20 screenshots.
-- **Audio extraction:** Uses FFmpeg to extract mono audio at 16 kHz into an MP3 file.
-- **Speech transcription:** Uses OpenAI Whisper (`whisper-1`) to produce text and timestamped transcript segments.
-- **Visual workflow reconstruction:** Uses GPT-4.1 to analyze screenshots alongside the transcript.
-- **Structured output:** Produces JSON describing workflow steps, timestamps, observed facts, spoken instructions, inferences, uncertainties, and evidence references.
-- **Evidence enrichment:** Checks screenshot and transcript references against records that actually exist.
-- **Human-review safeguards:** Marks every reconstructed step as `execution_ready: false` and `needs_human_review`.
+- **Video processing:** Reads `demo.webm` and extracts sampled screenshots.
+- **Audio processing:** Uses FFmpeg to extract audio and the OpenAI transcription API to produce text and timestamps.
+- **Workflow reconstruction:** Uses GPT-4.1 to combine screenshot evidence and spoken instructions into structured JSON.
+- **Evidence enrichment:** Records screenshot and transcript references, uncertainties, and review status.
+- **Dual-level indexing:** Stores one complete workflow record and separate records for its individual steps.
+- **Semantic retrieval:** Embeds a new task and retrieves a similar workflow from PostgreSQL using pgvector cosine distance.
+- **Workflow adaptation:** Uses the retrieved workflow as context for generating a Playwright script.
+- **Syntax and safety checks:** Checks generated code before saving it. These checks do not guarantee that code is safe or correct.
+- **Human checkpoints:** Keeps sensitive or insufficiently supported actions under human control.
 
-### Main files
+## 3. Main files
 
 | File | Purpose |
 |---|---|
-| `video_to_workflow.py` | Runs the video-to-workflow pipeline |
-| `demo.webm` | Example input recording |
-| `workflow_to_playwright.py` | Converts reconstructed workflow JSON into Playwright code |
+| `video_to_workflow.py` | Reconstructs a workflow from a recording |
+| `ingest_workflow_into_vectordb.py` | Embeds and indexes a workflow and its steps |
+| `retrieve_similar_workflow.py` | Finds a similar workflow using semantic retrieval |
+| `new_workflow_to_playwright.py` | Retrieves a workflow and generates adapted Playwright code |
+| `rag_workflow_assistant.py` | Additional RAG assistant entry point |
 | `requirements.txt` | Python dependencies |
-| `.env.example` | Example environment configuration |
-| `.env` | Local API credentials; never commit |
+| `.env.example` | Example configuration template |
+| `.env` | Local credentials and database configuration; never commit |
+| `demo.webm` | Example input recording |
 | `README.md` | Project documentation |
 
-Generated artifacts are stored in the ignored `output/` directory:
+Generated artifacts are stored locally in `output/`, which is excluded from Git:
 
 ```text
 output/
-├── frames/                  # Sampled screenshots
-├── audio.mp3                # Extracted audio
-├── workflow.json            # Reconstructed workflow
-└── generated_playwright.py  # Generated browser automation
+├── frames/
+├── audio.mp3
+├── workflow.json
+├── generated_playwright.py
+└── new_generated_playwright.py
 ```
 
-These files are created locally and are excluded from Git by default.
+The actual output files depend on which scripts have been run.
 
-### Installation
+## 4. System requirements
 
-Requirements:
+- Ubuntu or WSL with Ubuntu
+- Python 3.10 or newer
+- FFmpeg
+- PostgreSQL
+- The PostgreSQL pgvector extension
+- Chromium for Playwright
+- An OpenAI API key with access to the models used by the project
 
-- Python 3.10 or newer.
-- FFmpeg installed and available on `PATH`.
-- An OpenAI API key with access to the models used by the project.
-
-On Ubuntu or WSL, install FFmpeg:
+### Install system packages
 
 ```bash
 sudo apt update
-sudo apt install ffmpeg
+sudo apt install -y python3 python3-venv python3-pip ffmpeg postgresql
 ```
 
-Create and activate a virtual environment if you do not already have one:
+On Ubuntu versions where the matching package is available, install pgvector with:
+
+```bash
+sudo apt install postgresql-16-pgvector
+```
+
+The PostgreSQL major version and the pgvector package must be compatible. Package availability may vary by Ubuntu release.
+
+Check the installations:
+
+```bash
+python3 --version
+ffmpeg -version
+psql --version
+```
+
+## 5. Python environment
+
+From the repository root:
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-```
-
-Install the Python packages:
-
-```bash
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 ```
 
-Configure your API key in a local `.env` file:
-
-```dotenv
-OPENAI_API_KEY=your_openai_api_key_here
-```
-
-Never commit your actual API key or share it publicly.
-
-### Run workflow reconstruction
-
-Place the input recording at `demo.webm`, then run:
-
-```bash
-python video_to_workflow.py
-```
-
-The resulting workflow is saved to:
-
-```text
-output/workflow.json
-```
-
-### Current limitations
-
-- Screenshots are sampled rather than continuously analyzed.
-- A maximum of 20 screenshots are extracted, at timestamps starting at zero and spaced three seconds apart.
-- Actions between sampled frames may be missed.
-- AI-generated descriptions and interpretations can be incorrect.
-- Evidence-reference validation confirms that records exist, not that they prove the associated claims.
-- Every step remains unapproved for execution until a human-review process is implemented.
-- OpenAI API usage may incur costs.
-
-## 2. Browser Automation
-
-The second stage converts a reconstructed workflow into a Python script using Playwright.
-
-### Browser automation pipeline
-
-```text
-
-                       workflow.json
-                            |
-                            v
-                workflow_to_playwright.py
-                            |
-                            v
-                   OpenAI GPT-4.1 API
-                            |
-                            v
-            Generate Playwright script on the fly
-                            |
-                            v
-                  Browser automation
-
-```
-
-### How it works
-
-`workflow_to_playwright.py` reads `output/workflow.json`, sends the workflow to GPT-4.1, validates the returned source, and saves the generated Python script.
-
-The generator checks that the output includes Playwright, has a `__main__` guard, and passes Python syntax parsing. These checks do not prove that the script is correct or safe.
-
-The generated script is saved for review. The generator does not automatically execute it.
-
-### Generate browser automation
-
-First, run the workflow reconstruction pipeline if `output/workflow.json` does not exist:
-
-```bash
-python video_to_workflow.py
-```
-
-Then generate the Playwright script:
-
-```bash
-python workflow_to_playwright.py
-```
-
-The generated file is:
-
-```text
-output/generated_playwright.py
-```
-
-### Install the Playwright browser
-
-Install the Python package through `requirements.txt` as described above. Then install Chromium:
+Install the Playwright Chromium browser:
 
 ```bash
 python -m playwright install chromium
 ```
 
-On Linux or WSL, missing browser system libraries may require additional installation.
-
-### Run the generated script
-
-Inspect the code before executing it:
+If Playwright reports missing Linux libraries, use:
 
 ```bash
-sed -n '1,240p' output/generated_playwright.py
+python -m playwright install-deps chromium
 ```
 
-If you have reviewed the code and are comfortable with its actions, run:
+These commands install the browser runtime separately from the Python package.
+
+## 6. Configure environment variables
+
+Create a local `.env` file:
 
 ```bash
-python output/generated_playwright.py
+cp .env.example .env
 ```
 
-The current example workflow opens Chromium, navigates to Wikimedia Commons, and pauses at manual checkpoints for login and upload preparation. It does not automatically upload a file.
+Edit it and provide your own credentials and configuration:
 
-### Safety and human review
+```dotenv
+OPENAI_API_KEY=your_openai_api_key_here
 
-The browser automation stage is experimental.
+PGHOST=127.0.0.1
+PGPORT=5432
+PGDATABASE=ai_observability
+PGUSER=ai_observability_app
+PGPASSWORD=your_database_password_here
+```
 
-- Unverified, inferred, and spoken-only actions should remain TODOs.
-- Missing URLs, selectors, and form values must not be invented.
-- Login and sensitive interactions require appropriate human involvement.
-- Generated code must be reviewed before execution.
-- Syntax validation is not a security audit.
-- The workflow currently marks every step `execution_ready: false`. The generator must not treat those steps as approved actions.
-- Browser automation may behave differently from the original recording, so successful execution must be verified independently.
+Use the actual database password configured during setup. Do not commit `.env`, publish API keys, or include secrets in source code.
 
-### Future development
+## 7. PostgreSQL and pgvector setup
 
-Planned improvements include:
+This project uses PostgreSQL as its database and pgvector to store and compare vector embeddings.
 
-- A human-review stage for approving individual workflow steps.
-- A structured action schema instead of relying entirely on free-form code generation.
-- Better selector discovery and validation.
-- Automated tests for generated workflows.
-- More reliable execution checks and failure handling.
-- Improved evidence coverage and uncertainty reporting.
+The setup below documents the database configuration used during development.
 
-These are future goals, not features currently guaranteed by the implementation.
+### 7.1 Start PostgreSQL
 
-### Project principle
+```bash
+sudo service postgresql start
+sudo -u postgres psql
+```
 
-**Reconstruct first. Review the evidence. Approve actions explicitly. Automate only what has been verified.**
+### 7.2 Create the application user and database
+
+Inside the PostgreSQL prompt, create the application role and database. Replace the example password before running the SQL:
+
+```sql
+CREATE USER ai_observability_app
+WITH LOGIN PASSWORD 'CHANGE_THIS_PASSWORD';
+
+CREATE DATABASE ai_observability
+OWNER ai_observability_app;
+```
+
+If the role or database already exists, do not run the corresponding `CREATE` command again. Reuse the existing setup or modify it deliberately.
+
+Exit the PostgreSQL prompt:
+
+```sql
+\q
+```
+
+### 7.3 Enable pgvector and create the table
+
+Connect as the PostgreSQL administrator:
+
+```bash
+sudo -u postgres psql -d ai_observability
+```
+
+Run:
+
+```sql
+CREATE EXTENSION IF NOT EXISTS vector;
+
+CREATE TABLE IF NOT EXISTS workflow_chunks (
+    id BIGSERIAL PRIMARY KEY,
+    content TEXT NOT NULL,
+    metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+    embedding VECTOR(1536) NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    workflow_name TEXT NOT NULL DEFAULT '',
+    step_id TEXT NOT NULL DEFAULT '',
+    CONSTRAINT workflow_chunks_workflow_step_unique
+        UNIQUE (workflow_name, step_id)
+);
+
+GRANT CONNECT ON DATABASE ai_observability
+TO ai_observability_app;
+
+GRANT USAGE ON SCHEMA public
+TO ai_observability_app;
+
+GRANT SELECT, INSERT, UPDATE, DELETE
+ON TABLE workflow_chunks
+TO ai_observability_app;
+
+GRANT USAGE, SELECT
+ON SEQUENCE workflow_chunks_id_seq
+TO ai_observability_app;
+```
+
+Exit with `\q`.
+
+The embedding column uses `VECTOR(1536)` because the project uses the `text-embedding-3-small` model with its default embedding dimensions.
+
+The unique constraint prevents duplicate records for the same workflow and step ID. The ingestion script can update existing records instead of inserting duplicates.
+
+### 7.4 Verify the database
+
+Connect using the application credentials from `.env`:
+
+```bash
+psql -h 127.0.0.1 \
+  -U ai_observability_app \
+  -d ai_observability
+```
+
+Then run:
+
+```sql
+SELECT extname, extversion
+FROM pg_extension
+WHERE extname = 'vector';
+
+SELECT workflow_name, step_id
+FROM workflow_chunks
+ORDER BY workflow_name, step_id;
+```
+
+The first query checks whether pgvector is enabled. The second lists indexed workflow records.
+
+If the application role or database already exists, follow the existing database configuration rather than recreating it.
+
+## 8. Run the workflow pipeline
+
+### Step 1: Reconstruct the workflow
+
+Place the recording at `demo.webm` in the repository root and run:
+
+```bash
+python video_to_workflow.py
+```
+
+The script produces `output/workflow.json` and supporting local evidence files.
+
+The current implementation samples a limited number of screenshots. Actions between sampled frames can be missed, and a recording's full duration does not mean the entire recording was analyzed.
+
+### Step 2: Index the workflow
+
+After PostgreSQL is running and `.env` is configured:
+
+```bash
+python ingest_workflow_into_vectordb.py
+```
+
+The ingestion pipeline creates embeddings and stores two types of records:
+
+- **Workflow-level record:** A searchable representation of the entire workflow.
+- **Step-level records:** Individual workflow steps with their own evidence and metadata.
+
+This avoids relying only on small text chunks when the task requires retrieving an entire use case.
+
+### Step 3: Retrieve a similar workflow
+
+Run:
+
+```bash
+python retrieve_similar_workflow.py
+```
+
+Enter the task you want to automate and the target application when prompted.
+
+The script searches workflow-level records, ranks matches by vector similarity, and retrieves the matching workflow's ordered steps.
+
+A similarity score is a ranking signal, not a probability that the workflow is correct.
+
+### Step 4: Generate an adapted Playwright script
+
+Run:
+
+```bash
+python new_workflow_to_playwright.py
+```
+
+The script retrieves relevant workflow context, asks the language model to adapt it to the requested task, checks the generated source, and saves the result to:
+
+```text
+output/new_generated_playwright.py
+```
+
+Review the generated script before running it. The generator's static checks are not a security audit.
+
+### Step 5: Review and test
+
+Inspect the generated code:
+
+```bash
+sed -n '1,260p' output/new_generated_playwright.py
+```
+
+Only run it after you understand its actions and have checked the destination, selectors, and any state-changing operations.
+
+The current Wikimedia Commons example opens the site, clicks the login link, pauses for manual login, and pauses before upload preparation. It does not independently complete an upload.
+
+## 9. Safety and current limitations
+
+- **Sampled evidence:** The workflow reconstruction can miss actions between screenshots.
+- **AI uncertainty:** Model-generated steps, interpretations, and selectors can be incorrect.
+- **Evidence validation:** Checking that an evidence reference exists does not prove that it supports the associated claim.
+- **Human review:** Reconstructed steps are marked `execution_ready: false` and require review.
+- **Generated code:** Syntax checks do not prove runtime correctness or security.
+- **Credentials:** Login credentials should not be embedded in generated code or sent to the language model.
+- **State-changing actions:** Uploads, deletions, purchases, and other consequential actions require explicit review and appropriate confirmation.
+- **Database setup:** PostgreSQL and pgvector must be installed and configured separately from Python dependencies.
+- **Costs:** OpenAI API requests can incur charges.
+
+## 10. Development principles
+
+The project follows these principles:
+
+1. Reconstruct workflows from available evidence.
+2. Preserve uncertainty instead of inventing missing actions.
+3. Retrieve a relevant workflow before generating a new one.
+4. Keep workflow-level and step-level representations.
+5. Review generated automation before execution.
+6. Verify results independently.
+
+The long-term goal is to make GUI automation more reusable by learning from recorded workflows rather than generating every task from scratch.
