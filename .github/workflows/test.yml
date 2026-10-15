@@ -1,3 +1,4 @@
+
 name: AI Project Review
 
 on:
@@ -10,21 +11,11 @@ jobs:
   review:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Install OpenAI package
-        run: pip install openai
-
-      - name: Ask OpenAI
+      - name: Call GPT-4.1
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
+          pip install openai
           python - <<'PY'
           import os
           from openai import OpenAI
@@ -33,14 +24,13 @@ jobs:
 
           response = client.responses.create(
               model="gpt-4.1",
-              input=(
-                  "Analyze this repository. Explain what it does, "
-                  "identify potential bugs, and suggest three improvements. "
-                  "Do not modify any files."
-              )
+              input="Reply with exactly: Workflow test successful.",
+              max_output_tokens=20,
           )
 
+          print(response.output_text)
+
           with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:
-              f.write("## AI Project Review\n\n")
-              f.write(response.output_text + "\n")
+              f.write("## GPT-4.1 Test\n\n")
+              f.write(response.output_text)
           PY
