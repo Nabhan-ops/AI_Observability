@@ -1,0 +1,27 @@
+
+name: Copilot BYOK Test
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install Copilot CLI
+        run: npm install -g @github/copilot
+
+      - name: Test Copilot with OpenAI
+        env:
+          COPILOT_PROVIDER_BASE_URL: https://api.openai.com/v1
+          COPILOT_PROVIDER_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          COPILOT_MODEL: gpt-4.1
+          COPILOT_PROVIDER_MAX_OUTPUT_TOKENS: "20"
+        run: |
+          copilot --help
+          copilot -p "Reply with exactly: Copilot BYOK test successful." \
+            --model gpt-4.1 \
+            --no-ask-user
