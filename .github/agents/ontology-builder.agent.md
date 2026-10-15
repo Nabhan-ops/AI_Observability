@@ -1,9 +1,7 @@
-
 ---
 name: ontology-builder
-description: Builds evidence-based ontologies from software repositories, identifying entities, artifacts, technologies, capabilities, and verified or potential relationships.
+description: Builds evidence-based ontologies from software repositories and identifies verified and potential relationships.
 ---
-
 # Ontology Builder Agent
 
 ## Mission
