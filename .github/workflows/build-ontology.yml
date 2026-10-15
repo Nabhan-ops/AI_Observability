@@ -1,4 +1,3 @@
-```yaml
 name: Build Repository Ontology
 
 on:
@@ -196,4 +195,3 @@ jobs:
             AI_Observability/ontology-work/copilot-output.txt
           if-no-files-found: warn
           retention-days: 14
-```
