@@ -1,0 +1,305 @@
+
+name: Build Repository Ontology
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-ontology:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout AI_Observability
+        uses: actions/checkout@v4
+        with:
+          path: AI_Observability
+          fetch-depth: 1
+
+      - name: Checkout ML_HACKATHON_2022
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/ML_HACKATHON_2022
+          path: ML_HACKATHON_2022
+          fetch-depth: 1
+
+      - name: Install Python dependency
+        run: pip install openai
+
+      - name: Analyze repositories and build ontology
+        working-directory: AI_Observability
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          python - <<'PY'
+          import os
+          import json
+          from pathlib import Path
+          from openai import OpenAI
+
+          ROOT = Path("..")
+          OUTPUT = Path("ontology_output")
+          OUTPUT.mkdir(exist_ok=True)
+
+          # Files we want to inspect.
+          IMPORTANT_FILES = {
+              "README.md", "README.rst", "requirements.txt",
+              "pyproject.toml", "package.json", "Dockerfile",
+              "environment.yml", "environment.yaml",
+              "setup.py", "setup.cfg", "LICENSE"
+          }
+
+          # Avoid sending generated, private, or very large files.
+          SKIP_DIRS = {
+              ".git", ".venv", "venv", "node_modules",
+              "__pycache__", ".ipynb_checkpoints", "dist",
+              "build", "output", "ontology_output"
+          }
+
+          def inspect_repo(repo_name):
+              repo = ROOT / repo_name
+              if not repo.exists():
+                  raise FileNotFoundError(f"Repository not found: {repo}")
+
+              files = []
+              total_chars = 0
+              max_chars = 30000
+
+              for path in sorted(repo.rglob("*")):
+                  if not path.is_file():
+                      continue
+
+                  relative = path.relative_to(repo)
+
+                  if any(part in SKIP_DIRS for part in relative.parts):
+                      continue
+
+                  # Include project manifests, source code and notebooks.
+                  allowed = (
+                      path.name in IMPORTANT_FILES
+                      or path.suffix.lower() in {
+                          ".py", ".ipynb", ".md", ".yml", ".yaml",
+                          ".toml", ".js", ".ts", ".json"
+                      }
+                  )
+                  if not allowed:
+                      continue
+
+                  entry = {
+                      "path": str(relative),
+                      "type": path.suffix.lower() or "file"
+                  }
+
+                  # Always collect paths; limit the amount of file content.
+                  if total_chars < max_chars:
+                      try:
+                          if path.suffix.lower() == ".ipynb":
+                              notebook = json.loads(
+                                  path.read_text(encoding="utf-8")
+                              )
+                              parts = []
+                              for cell in notebook.get("cells", [])[:12]:
+                                  if cell.get("cell_type") in (
+                                      "markdown", "code"
+                                  ):
+                                      source = cell.get("source", [])
+                                      parts.append("".join(source))
+                              content = "\n\n".join(parts)
+                          else:
+                              content = path.read_text(
+                                  encoding="utf-8", errors="replace"
+                              )
+
+                          content = content[:5000]
+                          remaining = max_chars - total_chars
+                          content = content[:remaining]
+                          if content:
+                              entry["content_excerpt"] = content
+                              total_chars += len(content)
+                      except Exception as exc:
+                          entry["read_note"] = type(exc).__name__
+
+                  files.append(entry)
+
+              return {
+                  "repository_name": repo_name,
+                  "file_count": len(files),
+                  "files": files
+              }
+
+          repositories = [
+              inspect_repo("AI_Observability"),
+              inspect_repo("ML_HACKATHON_2022")
+          ]
+
+          client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+
+          prompt = """
+          Create a carefully evidence-based ontology of these two GitHub
+          repositories.
+
+          Return one valid JSON object with these top-level keys:
+
+          ontology_name
+          repositories
+          entities
+          relationships
+          shared_technologies
+          possible_connections
+          gaps_and_questions
+          summary
+
+          Requirements:
+
+          1. Describe each repository's name, purpose, actual artifacts,
+             technologies, capabilities, and evidence.
+          2. Create entities for repositories, artifacts, technologies,
+             capabilities, data types, external services, and goals where
+             supported by evidence.
+          3. Give every entity a stable ID, type, name, description,
+             evidence, and confidence ("high", "medium", or "low").
+          4. Represent connections as relationships with source_id,
+             predicate, target_id, evidence, and confidence.
+          5. Use clear predicates such as IMPLEMENTS, USES_TECHNOLOGY,
+             PRODUCES, CONSUMES, SUPPORTS, and RELATED_TO.
+          6. Identify shared technologies and possible connections between
+             the two repositories, but do not invent a connection.
+          7. Distinguish verified facts from hypotheses. Put unverified
+             connections in possible_connections, not established
+             relationships.
+          8. Include project maturity, reproducibility, documentation,
+             and potential reuse opportunities when the evidence supports
+             an assessment. Mark missing evidence as unknown.
+          9. Cite repository-relative file paths in evidence.
+          10. Do not infer a repository's purpose from its name alone.
+          11. Return JSON only. Do not include Markdown fences.
+          """
+
+          response = client.chat.completions.create(
+              model="gpt-4.1",
+              messages=[
+                  {
+                      "role": "system",
+                      "content": (
+                          "You are a software architecture analyst. "
+                          "Be precise, evidence-based, and conservative."
+                      )
+                  },
+                  {
+                      "role": "user",
+                      "content": prompt + "\n\nRepository evidence:\n" +
+                      json.dumps(repositories, ensure_ascii=False)
+                  }
+              ],
+              response_format={"type": "json_object"},
+              max_tokens=3500
+          )
+
+          raw = response.choices[0].message.content
+          ontology = json.loads(raw)
+
+          json_path = OUTPUT / "ontology.json"
+          json_path.write_text(
+              json.dumps(ontology, indent=2, ensure_ascii=False),
+              encoding="utf-8"
+          )
+
+          # Generate a readable report from the ontology.
+          lines = [
+              "# Repository Ontology",
+              "",
+              ontology.get("summary", ""),
+              "",
+              "## Repositories",
+              ""
+          ]
+
+          for repo in ontology.get("repositories", []):
+              lines.extend([
+                  f"### {repo.get('name', 'Unknown repository')}",
+                  "",
+                  repo.get("purpose", "Purpose not established."),
+                  ""
+              ])
+
+              if repo.get("artifacts"):
+                  lines.append("**Artifacts**")
+                  for artifact in repo["artifacts"]:
+                      if isinstance(artifact, dict):
+                          lines.append(
+                              "- " + artifact.get("name", "Unnamed artifact")
+                          )
+                      else:
+                          lines.append("- " + str(artifact))
+                  lines.append("")
+
+          lines.extend(["## Entities", ""])
+
+          for entity in ontology.get("entities", []):
+              lines.append(
+                  f"- **{entity.get('name', 'Unknown')}** "
+                  f"({entity.get('type', 'unknown')}): "
+                  f"{entity.get('description', '')}"
+              )
+
+          lines.extend(["", "## Relationships", ""])
+
+          for relation in ontology.get("relationships", []):
+              lines.append(
+                  f"- `{relation.get('source_id', '?')}` "
+                  f"-- **{relation.get('predicate', 'RELATED_TO')}** --> "
+                  f"`{relation.get('target_id', '?')}`"
+              )
+              if relation.get("evidence"):
+                  lines.append(
+                      f"  - Evidence: {relation['evidence']}"
+                  )
+
+          lines.extend(["", "## Possible Connections", ""])
+
+          for item in ontology.get("possible_connections", []):
+              if isinstance(item, dict):
+                  lines.append(
+                      f"- {item.get('description', json.dumps(item))}"
+                  )
+              else:
+                  lines.append(f"- {item}")
+
+          lines.extend(["", "## Gaps and Questions", ""])
+
+          for item in ontology.get("gaps_and_questions", []):
+              lines.append(
+                  "- " + (
+                      item.get("question", json.dumps(item))
+                      if isinstance(item, dict) else str(item)
+                  )
+              )
+
+          report = "\n".join(lines) + "\n"
+          (OUTPUT / "ontology-report.md").write_text(
+              report, encoding="utf-8"
+          )
+
+          # Show the result in the GitHub Actions Summary.
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
+              summary.write(report[:20000])
+
+          print("Ontology generated successfully.")
+          print(f"Entities: {len(ontology.get('entities', []))}")
+          print(
+              "Relationships: "
+              f"{len(ontology.get('relationships', []))}"
+          )
+          print(f"Files written to {OUTPUT}/")
+          PY
+
+      - name: Upload ontology files
+        uses: actions/upload-artifact@v4
+        with:
+          name: repository-ontology
+          path: AI_Observability/ontology_output/
+          if-no-files-found: error
+          retention-days: 14
