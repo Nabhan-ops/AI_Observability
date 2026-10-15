@@ -10,7 +10,7 @@ permissions:
 jobs:
   build-ontology:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
 
     steps:
       - name: Checkout AI_Observability
@@ -26,280 +26,239 @@ jobs:
           path: ML_HACKATHON_2022
           fetch-depth: 1
 
-      - name: Install Python dependency
-        run: pip install openai
+      - name: Install Copilot CLI
+        run: npm install -g @github/copilot
 
-      - name: Analyze repositories and build ontology
-        working-directory: AI_Observability
-        env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      - name: Prepare repository evidence
+        shell: bash
         run: |
-          python - <<'PY'
-          import os
+          set -e
+          mkdir -p AI_Observability/ontology-work/result
+
+          python3 - <<'PY'
           import json
           from pathlib import Path
-          from openai import OpenAI
 
-          ROOT = Path("..")
-          OUTPUT = Path("ontology_output")
-          OUTPUT.mkdir(exist_ok=True)
+          roots = [
+              Path("AI_Observability"),
+              Path("ML_HACKATHON_2022"),
+          ]
 
-          # Files we want to inspect.
-          IMPORTANT_FILES = {
-              "README.md", "README.rst", "requirements.txt",
-              "pyproject.toml", "package.json", "Dockerfile",
-              "environment.yml", "environment.yaml",
-              "setup.py", "setup.cfg", "LICENSE"
-          }
-
-          # Avoid sending generated, private, or very large files.
-          SKIP_DIRS = {
+          skip = {
               ".git", ".venv", "venv", "node_modules",
-              "__pycache__", ".ipynb_checkpoints", "dist",
-              "build", "output", "ontology_output"
+              "__pycache__", ".ipynb_checkpoints",
+              "dist", "build", "output", "ontology-work"
           }
 
-          def inspect_repo(repo_name):
-              repo = ROOT / repo_name
-              if not repo.exists():
-                  raise FileNotFoundError(f"Repository not found: {repo}")
+          allowed = {
+              ".py", ".ipynb", ".md", ".rst", ".txt",
+              ".yml", ".yaml", ".toml", ".json",
+              ".js", ".ts", ".html", ".sql"
+          }
 
+          evidence = []
+
+          for root in roots:
               files = []
               total_chars = 0
-              max_chars = 30000
 
-              for path in sorted(repo.rglob("*")):
+              for path in sorted(root.rglob("*")):
                   if not path.is_file():
                       continue
 
-                  relative = path.relative_to(repo)
+                  rel = path.relative_to(root)
 
-                  if any(part in SKIP_DIRS for part in relative.parts):
+                  if any(part in skip for part in rel.parts):
                       continue
 
-                  # Include project manifests, source code and notebooks.
-                  allowed = (
-                      path.name in IMPORTANT_FILES
-                      or path.suffix.lower() in {
-                          ".py", ".ipynb", ".md", ".yml", ".yaml",
-                          ".toml", ".js", ".ts", ".json"
+                  if (
+                      path.name not in {
+                          "README", "README.md", "README.rst",
+                          "requirements.txt", "pyproject.toml",
+                          "Dockerfile", "environment.yml",
+                          "environment.yaml", "setup.py"
                       }
-                  )
-                  if not allowed:
+                      and path.suffix.lower() not in allowed
+                  ):
                       continue
 
-                  entry = {
-                      "path": str(relative),
-                      "type": path.suffix.lower() or "file"
-                  }
+                  item = {"path": str(rel)}
 
-                  # Always collect paths; limit the amount of file content.
-                  if total_chars < max_chars:
+                  if total_chars < 18000:
                       try:
                           if path.suffix.lower() == ".ipynb":
                               notebook = json.loads(
                                   path.read_text(encoding="utf-8")
                               )
                               parts = []
-                              for cell in notebook.get("cells", [])[:12]:
-                                  if cell.get("cell_type") in (
-                                      "markdown", "code"
-                                  ):
-                                      source = cell.get("source", [])
-                                      parts.append("".join(source))
+                              for cell in notebook.get("cells", [])[:10]:
+                                  parts.append(
+                                      "".join(cell.get("source", []))
+                                  )
                               content = "\n\n".join(parts)
                           else:
                               content = path.read_text(
-                                  encoding="utf-8", errors="replace"
+                                  encoding="utf-8",
+                                  errors="replace"
                               )
 
-                          content = content[:5000]
-                          remaining = max_chars - total_chars
-                          content = content[:remaining]
+                          content = content[:3000]
+                          content = content[:18000 - total_chars]
+
                           if content:
-                              entry["content_excerpt"] = content
+                              item["excerpt"] = content
                               total_chars += len(content)
-                      except Exception as exc:
-                          entry["read_note"] = type(exc).__name__
 
-                  files.append(entry)
+                      except Exception:
+                          item["excerpt"] = "[Could not read file]"
 
-              return {
-                  "repository_name": repo_name,
-                  "file_count": len(files),
+                  files.append(item)
+
+              evidence.append({
+                  "repository": root.name,
                   "files": files
-              }
+              })
 
-          repositories = [
-              inspect_repo("AI_Observability"),
-              inspect_repo("ML_HACKATHON_2022")
-          ]
-
-          client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
-
-          prompt = """
-          Create a carefully evidence-based ontology of these two GitHub
-          repositories.
-
-          Return one valid JSON object with these top-level keys:
-
-          ontology_name
-          repositories
-          entities
-          relationships
-          shared_technologies
-          possible_connections
-          gaps_and_questions
-          summary
-
-          Requirements:
-
-          1. Describe each repository's name, purpose, actual artifacts,
-             technologies, capabilities, and evidence.
-          2. Create entities for repositories, artifacts, technologies,
-             capabilities, data types, external services, and goals where
-             supported by evidence.
-          3. Give every entity a stable ID, type, name, description,
-             evidence, and confidence ("high", "medium", or "low").
-          4. Represent connections as relationships with source_id,
-             predicate, target_id, evidence, and confidence.
-          5. Use clear predicates such as IMPLEMENTS, USES_TECHNOLOGY,
-             PRODUCES, CONSUMES, SUPPORTS, and RELATED_TO.
-          6. Identify shared technologies and possible connections between
-             the two repositories, but do not invent a connection.
-          7. Distinguish verified facts from hypotheses. Put unverified
-             connections in possible_connections, not established
-             relationships.
-          8. Include project maturity, reproducibility, documentation,
-             and potential reuse opportunities when the evidence supports
-             an assessment. Mark missing evidence as unknown.
-          9. Cite repository-relative file paths in evidence.
-          10. Do not infer a repository's purpose from its name alone.
-          11. Return JSON only. Do not include Markdown fences.
-          """
-
-          response = client.chat.completions.create(
-              model="gpt-4.1",
-              messages=[
-                  {
-                      "role": "system",
-                      "content": (
-                          "You are a software architecture analyst. "
-                          "Be precise, evidence-based, and conservative."
-                      )
-                  },
-                  {
-                      "role": "user",
-                      "content": prompt + "\n\nRepository evidence:\n" +
-                      json.dumps(repositories, ensure_ascii=False)
-                  }
-              ],
-              response_format={"type": "json_object"},
-              max_tokens=3500
+          destination = Path(
+              "AI_Observability/ontology-work/evidence.json"
           )
-
-          raw = response.choices[0].message.content
-          ontology = json.loads(raw)
-
-          json_path = OUTPUT / "ontology.json"
-          json_path.write_text(
-              json.dumps(ontology, indent=2, ensure_ascii=False),
+          destination.write_text(
+              json.dumps(evidence, ensure_ascii=False, indent=2),
               encoding="utf-8"
           )
 
-          # Generate a readable report from the ontology.
-          lines = [
-              "# Repository Ontology",
-              "",
-              ontology.get("summary", ""),
-              "",
-              "## Repositories",
-              ""
-          ]
-
-          for repo in ontology.get("repositories", []):
-              lines.extend([
-                  f"### {repo.get('name', 'Unknown repository')}",
-                  "",
-                  repo.get("purpose", "Purpose not established."),
-                  ""
-              ])
-
-              if repo.get("artifacts"):
-                  lines.append("**Artifacts**")
-                  for artifact in repo["artifacts"]:
-                      if isinstance(artifact, dict):
-                          lines.append(
-                              "- " + artifact.get("name", "Unnamed artifact")
-                          )
-                      else:
-                          lines.append("- " + str(artifact))
-                  lines.append("")
-
-          lines.extend(["## Entities", ""])
-
-          for entity in ontology.get("entities", []):
-              lines.append(
-                  f"- **{entity.get('name', 'Unknown')}** "
-                  f"({entity.get('type', 'unknown')}): "
-                  f"{entity.get('description', '')}"
-              )
-
-          lines.extend(["", "## Relationships", ""])
-
-          for relation in ontology.get("relationships", []):
-              lines.append(
-                  f"- `{relation.get('source_id', '?')}` "
-                  f"-- **{relation.get('predicate', 'RELATED_TO')}** --> "
-                  f"`{relation.get('target_id', '?')}`"
-              )
-              if relation.get("evidence"):
-                  lines.append(
-                      f"  - Evidence: {relation['evidence']}"
-                  )
-
-          lines.extend(["", "## Possible Connections", ""])
-
-          for item in ontology.get("possible_connections", []):
-              if isinstance(item, dict):
-                  lines.append(
-                      f"- {item.get('description', json.dumps(item))}"
-                  )
-              else:
-                  lines.append(f"- {item}")
-
-          lines.extend(["", "## Gaps and Questions", ""])
-
-          for item in ontology.get("gaps_and_questions", []):
-              lines.append(
-                  "- " + (
-                      item.get("question", json.dumps(item))
-                      if isinstance(item, dict) else str(item)
-                  )
-              )
-
-          report = "\n".join(lines) + "\n"
-          (OUTPUT / "ontology-report.md").write_text(
-              report, encoding="utf-8"
-          )
-
-          # Show the result in the GitHub Actions Summary.
-          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
-              summary.write(report[:20000])
-
-          print("Ontology generated successfully.")
-          print(f"Entities: {len(ontology.get('entities', []))}")
-          print(
-              "Relationships: "
-              f"{len(ontology.get('relationships', []))}"
-          )
-          print(f"Files written to {OUTPUT}/")
+          for repo in evidence:
+              print(f"{repo['repository']}: {len(repo['files'])} files")
           PY
 
-      - name: Upload ontology files
+      - name: Generate ontology with Copilot CLI
+        working-directory: AI_Observability
+        env:
+          COPILOT_PROVIDER_BASE_URL: https://api.openai.com/v1
+          COPILOT_PROVIDER_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          COPILOT_PROVIDER_TYPE: openai
+          COPILOT_MODEL: gpt-4.1
+          COPILOT_PROVIDER_MAX_OUTPUT_TOKENS: "4000"
+          COPILOT_AUTO_UPDATE: "false"
+        run: |
+          set -e
+
+          test -f .github/agents/ontology-builder.agent.md
+          test -f ontology-work/evidence.json
+
+          PROMPT=$(cat <<'PROMPT_EOF'
+          Build an evidence-based ontology from ontology-work/evidence.json.
+
+          Follow the ontology-builder agent instructions.
+
+          Create exactly these output files:
+          - ontology-work/result/ontology.json
+          - ontology-work/result/ontology-report.md
+
+          The JSON must contain:
+          ontology_name, repositories, entities, relationships,
+          shared_technologies, possible_connections,
+          gaps_and_questions, summary.
+
+          Entities need stable unique IDs, types, names, descriptions,
+          evidence and confidence.
+
+          Relationships need source_id, predicate, target_id,
+          evidence and confidence.
+
+          Check both repositories separately, then compare them.
+          Identify artifacts, technologies, capabilities, goals,
+          data formats, models, workflows and external services
+          when supported by evidence.
+
+          Use repository-relative file paths for evidence.
+          Separate verified relationships from hypotheses.
+          Shared technologies alone do not prove direct integration.
+          Do not invent facts, expose secrets, execute repository code,
+          or modify source files.
+
+          Validate the JSON and ensure every relationship points
+          to an existing entity. Explain findings and uncertainties
+          in the Markdown report.
+
+          Do not print the full ontology in your final response.
+          Confirm the paths of the two files when finished.
+          PROMPT_EOF
+          )
+
+          copilot -p "$PROMPT" \
+            --agent ontology-builder \
+            --model gpt-4.1 \
+            --silent \
+            --no-ask-user \
+            --add-dir ontology-work \
+            > ontology-work/copilot-output.txt
+
+          cat ontology-work/copilot-output.txt
+
+          test -s ontology-work/result/ontology.json
+          test -s ontology-work/result/ontology-report.md
+
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          path = Path("ontology-work/result/ontology.json")
+          data = json.loads(path.read_text(encoding="utf-8"))
+
+          required = [
+              "ontology_name", "repositories", "entities",
+              "relationships", "shared_technologies",
+              "possible_connections", "gaps_and_questions", "summary"
+          ]
+
+          missing = [key for key in required if key not in data]
+          if missing:
+              raise ValueError(f"Missing JSON keys: {missing}")
+
+          entity_ids = [
+              entity.get("id")
+              for entity in data["entities"]
+              if isinstance(entity, dict)
+          ]
+
+          if len(entity_ids) != len(set(entity_ids)):
+              raise ValueError("Duplicate entity IDs found")
+
+          known_ids = set(entity_ids)
+
+          for relationship in data["relationships"]:
+              if relationship.get("source_id") not in known_ids:
+                  raise ValueError(
+                      "Relationship references unknown source entity"
+                  )
+              if relationship.get("target_id") not in known_ids:
+                  raise ValueError(
+                      "Relationship references unknown target entity"
+                  )
+
+          print("Ontology JSON validated successfully.")
+          print("Entities:", len(data["entities"]))
+          print("Relationships:", len(data["relationships"]))
+          PY
+
+      - name: Publish workflow summary
+        if: success()
+        run: |
+          {
+            echo "# Repository Ontology"
+            echo
+            cat AI_Observability/ontology-work/result/ontology-report.md
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload ontology artifact
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: repository-ontology
-          path: AI_Observability/ontology_output/
-          if-no-files-found: error
+          path: |
+            AI_Observability/ontology-work/result/
+            AI_Observability/ontology-work/evidence.json
+            AI_Observability/ontology-work/copilot-output.txt
+          if-no-files-found: warn
           retention-days: 14
