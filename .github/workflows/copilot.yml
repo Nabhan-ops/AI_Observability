@@ -1,0 +1,25 @@
+name: Copilot Project Review
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - run: npm install -g @github/copilot
+
+      - name: Run Copilot
+        env:
+          COPILOT_GITHUB_TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
+        run: |
+          copilot -p "Analyze this repository. Explain what it does, identify potential bugs, and suggest 3 improvements. Do not modify files." -s --allow-tool=read --no-ask-user >> "$GITHUB_STEP_SUMMARY"
