@@ -1,4 +1,4 @@
-
+```yaml
 name: Build Repository Ontology
 
 on:
@@ -29,108 +29,8 @@ jobs:
       - name: Install Copilot CLI
         run: npm install -g @github/copilot
 
-      - name: Prepare repository evidence
-        shell: bash
-        run: |
-          set -e
-          mkdir -p AI_Observability/ontology-work/result
-
-          python3 - <<'PY'
-          import json
-          from pathlib import Path
-
-          roots = [
-              Path("AI_Observability"),
-              Path("ML_HACKATHON_2022"),
-          ]
-
-          skip = {
-              ".git", ".venv", "venv", "node_modules",
-              "__pycache__", ".ipynb_checkpoints",
-              "dist", "build", "output", "ontology-work"
-          }
-
-          allowed = {
-              ".py", ".ipynb", ".md", ".rst", ".txt",
-              ".yml", ".yaml", ".toml", ".json",
-              ".js", ".ts", ".html", ".sql"
-          }
-
-          evidence = []
-
-          for root in roots:
-              files = []
-              total_chars = 0
-
-              for path in sorted(root.rglob("*")):
-                  if not path.is_file():
-                      continue
-
-                  rel = path.relative_to(root)
-
-                  if any(part in skip for part in rel.parts):
-                      continue
-
-                  if (
-                      path.name not in {
-                          "README", "README.md", "README.rst",
-                          "requirements.txt", "pyproject.toml",
-                          "Dockerfile", "environment.yml",
-                          "environment.yaml", "setup.py"
-                      }
-                      and path.suffix.lower() not in allowed
-                  ):
-                      continue
-
-                  item = {"path": str(rel)}
-
-                  if total_chars < 18000:
-                      try:
-                          if path.suffix.lower() == ".ipynb":
-                              notebook = json.loads(
-                                  path.read_text(encoding="utf-8")
-                              )
-                              parts = []
-                              for cell in notebook.get("cells", [])[:10]:
-                                  parts.append(
-                                      "".join(cell.get("source", []))
-                                  )
-                              content = "\n\n".join(parts)
-                          else:
-                              content = path.read_text(
-                                  encoding="utf-8",
-                                  errors="replace"
-                              )
-
-                          content = content[:3000]
-                          content = content[:18000 - total_chars]
-
-                          if content:
-                              item["excerpt"] = content
-                              total_chars += len(content)
-
-                      except Exception:
-                          item["excerpt"] = "[Could not read file]"
-
-                  files.append(item)
-
-              evidence.append({
-                  "repository": root.name,
-                  "files": files
-              })
-
-          destination = Path(
-              "AI_Observability/ontology-work/evidence.json"
-          )
-          destination.write_text(
-              json.dumps(evidence, ensure_ascii=False, indent=2),
-              encoding="utf-8"
-          )
-
-          for repo in evidence:
-              print(f"{repo['repository']}: {len(repo['files'])} files")
-          PY
-
+      # Copilot CLI handles repository analysis and creates the files.
+      # No Python scripts are used.
       - name: Generate ontology with Copilot CLI
         working-directory: AI_Observability
         env:
@@ -138,51 +38,83 @@ jobs:
           COPILOT_PROVIDER_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           COPILOT_PROVIDER_TYPE: openai
           COPILOT_MODEL: gpt-4.1
-          COPILOT_PROVIDER_MAX_OUTPUT_TOKENS: "4000"
+          COPILOT_PROVIDER_MAX_OUTPUT_TOKENS: "6000"
           COPILOT_AUTO_UPDATE: "false"
+        shell: bash
         run: |
-          set -e
+          set -euo pipefail
 
           test -f .github/agents/ontology-builder.agent.md
-          test -f ontology-work/evidence.json
+
+          mkdir -p ontology-work/result
 
           PROMPT=$(cat <<'PROMPT_EOF'
-          Build an evidence-based ontology from ontology-work/evidence.json.
+          Analyze both checked-out repositories:
+          - AI_Observability
+          - ML_HACKATHON_2022
 
-          Follow the ontology-builder agent instructions.
+          The current working directory is AI_Observability.
+          The sibling repository is ../ML_HACKATHON_2022.
 
-          Create exactly these output files:
-          - ontology-work/result/ontology.json
-          - ontology-work/result/ontology-report.md
+          Read repository documentation, source files, notebooks,
+          dependencies, and configuration files. Do not execute
+          repository code.
+
+          Follow the ontology-builder custom agent instructions.
+
+          Create these two actual files using your file-writing tools:
+          1. ontology-work/result/ontology.json
+          2. ontology-work/result/ontology-report.md
+
+          Do not merely print their contents or claim they exist.
+          You must write both files to disk.
 
           The JSON must contain:
-          ontology_name, repositories, entities, relationships,
-          shared_technologies, possible_connections,
-          gaps_and_questions, summary.
+          - ontology_name
+          - repositories
+          - entities
+          - relationships
+          - shared_technologies
+          - possible_connections
+          - gaps_and_questions
+          - summary
 
-          Entities need stable unique IDs, types, names, descriptions,
-          evidence and confidence.
+          Each entity must have:
+          - id
+          - type
+          - name
+          - description
+          - evidence
+          - confidence
 
-          Relationships need source_id, predicate, target_id,
-          evidence and confidence.
+          Each relationship must have:
+          - source_id
+          - predicate
+          - target_id
+          - evidence
+          - confidence
 
-          Check both repositories separately, then compare them.
-          Identify artifacts, technologies, capabilities, goals,
-          data formats, models, workflows and external services
-          when supported by evidence.
+          Use unique, stable entity IDs.
+          Every relationship must point to existing entities.
+          Use repository-relative paths as evidence.
 
-          Use repository-relative file paths for evidence.
-          Separate verified relationships from hypotheses.
-          Shared technologies alone do not prove direct integration.
-          Do not invent facts, expose secrets, execute repository code,
-          or modify source files.
+          Separate verified facts, inferences, and hypotheses.
+          Shared technologies do not prove direct integration.
+          Never invent features or relationships.
+          Do not expose secrets or modify source files.
 
-          Validate the JSON and ensure every relationship points
-          to an existing entity. Explain findings and uncertainties
-          in the Markdown report.
+          The Markdown report should explain:
+          - What each repository does
+          - Important artifacts and technologies
+          - Evidence-backed relationships
+          - Shared technologies
+          - Potential cross-repository connections
+          - Gaps, uncertainties, and questions
 
-          Do not print the full ontology in your final response.
-          Confirm the paths of the two files when finished.
+          Before finishing, read the files you created and check
+          that the JSON is valid and relationship IDs exist.
+
+          Return a short status message. Do not print the full ontology.
           PROMPT_EOF
           )
 
@@ -191,59 +123,62 @@ jobs:
             --model gpt-4.1 \
             --silent \
             --no-ask-user \
+            --allow-tool='read,write' \
             --add-dir ontology-work \
+            --add-dir ../ML_HACKATHON_2022 \
             > ontology-work/copilot-output.txt
 
-          cat ontology-work/copilot-output.txt
+          # Verify that Copilot actually created the files.
+          if [[ ! -s ontology-work/result/ontology.json ]]; then
+            echo "::error::Copilot did not create ontology.json"
+            cat ontology-work/copilot-output.txt
+            exit 1
+          fi
 
-          test -s ontology-work/result/ontology.json
-          test -s ontology-work/result/ontology-report.md
+          if [[ ! -s ontology-work/result/ontology-report.md ]]; then
+            echo "::error::Copilot did not create ontology-report.md"
+            cat ontology-work/copilot-output.txt
+            exit 1
+          fi
 
-          python3 - <<'PY'
-          import json
-          from pathlib import Path
+          # Validate JSON using a command-line JSON parser, not Python.
+          if ! jq -e '
+            .ontology_name and
+            (.repositories | type == "array") and
+            (.entities | type == "array") and
+            (.relationships | type == "array") and
+            (.shared_technologies != null) and
+            (.possible_connections != null) and
+            (.gaps_and_questions != null) and
+            (.summary != null)
+          ' ontology-work/result/ontology.json > /dev/null; then
+            echo "::error::Ontology JSON is invalid or missing required fields"
+            exit 1
+          fi
 
-          path = Path("ontology-work/result/ontology.json")
-          data = json.loads(path.read_text(encoding="utf-8"))
+          # Check unique entity IDs and relationship endpoints.
+          jq -e '
+            ([.entities[].id] | length) ==
+            ([.entities[].id] | unique | length)
+            and
+            (
+              [.entities[].id] as $ids |
+              all(
+                .relationships[];
+                (.source_id as $s | $ids | index($s)) != null
+                and
+                (.target_id as $t | $ids | index($t)) != null
+              )
+            )
+          ' ontology-work/result/ontology.json > /dev/null
 
-          required = [
-              "ontology_name", "repositories", "entities",
-              "relationships", "shared_technologies",
-              "possible_connections", "gaps_and_questions", "summary"
-          ]
-
-          missing = [key for key in required if key not in data]
-          if missing:
-              raise ValueError(f"Missing JSON keys: {missing}")
-
-          entity_ids = [
-              entity.get("id")
-              for entity in data["entities"]
-              if isinstance(entity, dict)
-          ]
-
-          if len(entity_ids) != len(set(entity_ids)):
-              raise ValueError("Duplicate entity IDs found")
-
-          known_ids = set(entity_ids)
-
-          for relationship in data["relationships"]:
-              if relationship.get("source_id") not in known_ids:
-                  raise ValueError(
-                      "Relationship references unknown source entity"
-                  )
-              if relationship.get("target_id") not in known_ids:
-                  raise ValueError(
-                      "Relationship references unknown target entity"
-                  )
-
-          print("Ontology JSON validated successfully.")
-          print("Entities:", len(data["entities"]))
-          print("Relationships:", len(data["relationships"]))
-          PY
+          echo "Ontology files created and validated."
+          echo "Entities: $(jq '.entities | length' ontology-work/result/ontology.json)"
+          echo "Relationships: $(jq '.relationships | length' ontology-work/result/ontology.json)"
 
       - name: Publish workflow summary
         if: success()
+        shell: bash
         run: |
           {
             echo "# Repository Ontology"
@@ -258,7 +193,7 @@ jobs:
           name: repository-ontology
           path: |
             AI_Observability/ontology-work/result/
-            AI_Observability/ontology-work/evidence.json
             AI_Observability/ontology-work/copilot-output.txt
           if-no-files-found: warn
           retention-days: 14
+```
