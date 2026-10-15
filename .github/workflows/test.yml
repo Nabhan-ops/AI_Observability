@@ -1,0 +1,46 @@
+name: AI Project Review
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install OpenAI package
+        run: pip install openai
+
+      - name: Ask OpenAI
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          python - <<'PY'
+          import os
+          from openai import OpenAI
+
+          client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+
+          response = client.responses.create(
+              model="gpt-4.1",
+              input=(
+                  "Analyze this repository. Explain what it does, "
+                  "identify potential bugs, and suggest three improvements. "
+                  "Do not modify any files."
+              )
+          )
+
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:
+              f.write("## AI Project Review\n\n")
+              f.write(response.output_text + "\n")
+          PY
