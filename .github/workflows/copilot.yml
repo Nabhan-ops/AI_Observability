@@ -10,11 +10,16 @@ jobs:
   review:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+
+      - name: Install OpenAI package
+        run: pip install openai
 
       - name: Ask OpenAI
         env:
@@ -28,9 +33,14 @@ jobs:
 
           response = client.responses.create(
               model="gpt-4.1",
-              input="Analyze this repository. Explain its purpose and suggest three improvements. Do not modify any files."
+              input=(
+                  "Analyze this repository. Explain what it does, "
+                  "identify potential bugs, and suggest three improvements. "
+                  "Do not modify any files."
+              )
           )
 
           with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:
+              f.write("## AI Project Review\n\n")
               f.write(response.output_text + "\n")
           PY
