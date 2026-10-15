@@ -10,6 +10,7 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
+
     steps:
       - name: Install Copilot CLI
         run: npm install -g @github/copilot
@@ -21,7 +22,19 @@ jobs:
           COPILOT_MODEL: gpt-4.1
           COPILOT_PROVIDER_MAX_OUTPUT_TOKENS: "20"
         run: |
-          copilot --help
+          set -e
+
           copilot -p "Reply with exactly: Copilot BYOK test successful." \
             --model gpt-4.1 \
-            --no-ask-user
+            --silent \
+            --no-ask-user \
+            > copilot-output.txt
+
+          echo "Copilot response:"
+          cat copilot-output.txt
+
+          {
+            echo "## Copilot BYOK Test"
+            echo
+            cat copilot-output.txt
+          } >> "$GITHUB_STEP_SUMMARY"
