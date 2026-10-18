@@ -1,0 +1,41 @@
+
+name: CERIT BYOK Test
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Install Copilot CLI
+        run: npm install -g @github/copilot
+
+      - name: Test Copilot with CERIT
+        env:
+          COPILOT_PROVIDER_BASE_URL: https://llm.ai.e-infra.cz/v1
+          COPILOT_PROVIDER_API_KEY: ${{ secrets.CERIT_API_KEY }}
+          COPILOT_PROVIDER_TYPE: openai
+          COPILOT_MODEL: gpt-oss-120b
+          COPILOT_PROVIDER_MAX_OUTPUT_TOKENS: "50"
+        run: |
+          set -e
+
+          copilot -p "Reply with exactly: CERIT API test successful." \
+            --model gpt-oss-120b \
+            --silent \
+            --no-ask-user \
+            > copilot-output.txt
+
+          echo "CERIT response:"
+          cat copilot-output.txt
+
+          {
+            echo "## CERIT BYOK Test"
+            echo
+            cat copilot-output.txt
+          } >> "$GITHUB_STEP_SUMMARY"
