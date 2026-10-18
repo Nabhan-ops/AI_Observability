@@ -12,6 +12,66 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Check CERIT API directly
+        env:
+          CERIT_API_KEY: ${{ secrets.CERIT_API_KEY }}
+          CERIT_BASE_URL: https://llm.ai.e-infra.cz/v1
+          CERIT_MODEL: gpt-oss-120b
+        run: |
+          set -euo pipefail
+
+          response=$(curl --fail-with-body --silent --show-error \
+            "$CERIT_BASE_URL/chat/completions" \
+            -H "Authorization: Bearer $CERIT_API_KEY" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "model": "gpt-oss-120b",
+              "messages": [
+                {
+                  "role": "user",
+                  "content": "Reply with exactly: CERIT gpt-oss-120b direct API test successful."
+                }
+              ],
+              "max_tokens": 80,
+              "stream": false
+            }')
+
+          echo "$response" | jq '{
+            model: .model,
+            response: .choices[0].message.content
+          }'
+
+          actual_model=$(echo "$response" | jq -r '.model // empty')
+          answer=$(echo "$response" | jq -r '.choices[0].message.content // empty')
+
+          if [ -z "$actual_model" ] || [ -z "$answer" ]; then
+            echo "ERROR: API response did not contain a model ID and answer."
+            exit 1
+          fi
+
+          if [ "$actual_model" != "$CERIT_MODEL" ]; then
+            echo "ERROR: Requested $CERIT_MODEL but API reported $actual_model."
+            exit 1
+          fi
+
+          if ! echo "$answer" | grep -Fq "CERIT gpt-oss-120b direct API test successful."; then
+            echo "ERROR: The response did not contain the expected phrase."
+            exit 1
+          fi
+
+          {
+            echo "## CERIT Direct API Test"
+            echo
+            echo "- Requested model: \`$CERIT_MODEL\`"
+            echo "- API-reported model: \`$actual_model\`"
+            echo
+            echo "### Response"
+            echo
+            echo "$answer"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          echo "SUCCESS: CERIT returned the expected model ID and answer."
+
       - name: Install Copilot CLI
         run: npm install -g @github/copilot
 
@@ -21,35 +81,32 @@ jobs:
           COPILOT_PROVIDER_API_KEY: ${{ secrets.CERIT_API_KEY }}
           COPILOT_PROVIDER_TYPE: openai
           COPILOT_MODEL: gpt-oss-120b
-          COPILOT_PROVIDER_MAX_OUTPUT_TOKENS: "50"
+          COPILOT_PROVIDER_MAX_OUTPUT_TOKENS: "80"
         run: |
-          set -e
+          set -euo pipefail
 
-          copilot -p "Reply with exactly: CERIT API test successful." \
+          copilot -p "Reply with exactly: CERIT Copilot test successful." \
             --model gpt-oss-120b \
             --silent \
             --no-ask-user \
             > copilot-output.txt
-
-          echo "CERIT response:"
-          cat copilot-output.txt
 
           if [ ! -s copilot-output.txt ]; then
             echo "ERROR: Copilot returned an empty response."
             exit 1
           fi
 
-          if ! grep -Fq "CERIT API test successful." copilot-output.txt; then
-            echo "ERROR: Expected response was not found."
+          cat copilot-output.txt
+
+          if ! grep -Fq "CERIT Copilot test successful." copilot-output.txt; then
+            echo "ERROR: Copilot did not return the expected phrase."
             exit 1
           fi
 
-          echo "SUCCESS: Expected model response received."
-
           {
-            echo "## CERIT BYOK Test"
+            echo "## CERIT Copilot Test"
             echo
             cat copilot-output.txt
-            echo
-            echo "Test passed: expected response received."
           } >> "$GITHUB_STEP_SUMMARY"
+
+          echo "SUCCESS: Copilot returned the expected response."
