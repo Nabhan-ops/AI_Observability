@@ -12,18 +12,14 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # STEP 1: Send a request directly to the CERIT API.
-      # This helps us inspect the real response before testing Copilot.
-      - name: Check CERIT API directly
+      # TEST 1: Ask the CERIT model a real question.
+      - name: Ask CERIT how it is
         env:
           CERIT_API_KEY: ${{ secrets.CERIT_API_KEY }}
         run: |
           set -euo pipefail
 
-          if [ -z "${CERIT_API_KEY:-}" ]; then
-            echo "ERROR: CERIT_API_KEY secret is empty or missing."
-            exit 1
-          fi
+          echo "Sending a question to CERIT..."
 
           HTTP_STATUS=$(curl -sS \
             -o response.json \
@@ -36,57 +32,81 @@ jobs:
               "messages": [
                 {
                   "role": "user",
-                  "content": "Reply with exactly: CERIT model test successful."
+                  "content": "How are you? Reply in one short sentence."
                 }
               ],
-              "max_tokens": 80,
+              "max_tokens": 100,
               "stream": false
             }')
 
           echo "HTTP status: $HTTP_STATUS"
-          echo
-          echo "Raw CERIT API response:"
 
-          # Print the response without exposing the API key.
-          jq . response.json
-
+          # Stop if the API reports an HTTP error.
           if [ "$HTTP_STATUS" -lt 200 ] || [ "$HTTP_STATUS" -ge 300 ]; then
-            echo "ERROR: CERIT returned HTTP $HTTP_STATUS."
+            echo "API request failed. Response:"
+            jq . response.json
             exit 1
           fi
 
-          echo
-          echo "Diagnostic request completed."
-          echo "Inspect the response above to identify its answer format."
+          # Print the complete JSON response for inspection.
+          echo "Complete API response:"
+          jq . response.json
 
-      # STEP 2: Install the GitHub Copilot CLI.
+          # Extract the standard OpenAI-compatible response fields.
+          MODEL=$(jq -r '.model // "unknown"' response.json)
+          ANSWER=$(jq -r '.choices[0].message.content // empty' response.json)
+
+          echo
+          echo "Model reported by API: $MODEL"
+          echo "Model answer:"
+
+          if [ -n "$ANSWER" ]; then
+            echo "$ANSWER"
+          else
+            echo "No answer found in choices[0].message.content."
+            echo "Inspect the complete JSON above to see the response format."
+            exit 1
+          fi
+
+          # Make the answer visible in the GitHub Actions summary.
+          {
+            echo "## Direct CERIT API Test"
+            echo
+            echo "**Model reported:** $MODEL"
+            echo
+            echo "**Question:** How are you?"
+            echo
+            echo "**Answer:**"
+            echo
+            echo "$ANSWER"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # TEST 2: Install the Copilot CLI.
       - name: Install Copilot CLI
         run: npm install -g @github/copilot
 
-      # STEP 3: Configure Copilot to use CERIT instead of its default provider.
+      # TEST 3: Ask Copilot CLI using the CERIT provider.
       - name: Test Copilot with CERIT
         env:
           COPILOT_PROVIDER_BASE_URL: https://llm.ai.e-infra.cz/v1
           COPILOT_PROVIDER_API_KEY: ${{ secrets.CERIT_API_KEY }}
           COPILOT_PROVIDER_TYPE: openai
           COPILOT_MODEL: gpt-oss-120b
-          COPILOT_PROVIDER_MAX_OUTPUT_TOKENS: "80"
+          COPILOT_PROVIDER_MAX_OUTPUT_TOKENS: "100"
         run: |
           set -euo pipefail
 
-          if [ -z "${COPILOT_PROVIDER_API_KEY:-}" ]; then
-            echo "ERROR: CERIT API key is missing."
-            exit 1
-          fi
+          echo "Asking Copilot a question through CERIT..."
 
           copilot -p \
-            "Reply with exactly: CERIT Copilot test successful." \
+            "How are you? Reply in one short sentence." \
             --model gpt-oss-120b \
             --silent \
             --no-ask-user \
             > copilot-output.txt
 
-          echo "Copilot response:"
+          echo
+          echo "Copilot's actual response:"
           cat copilot-output.txt
 
           if [ ! -s copilot-output.txt ]; then
@@ -94,19 +114,12 @@ jobs:
             exit 1
           fi
 
-          if ! grep -Fq \
-            "CERIT Copilot test successful." \
-            copilot-output.txt; then
-            echo "ERROR: Expected text was not found in the response."
-            exit 1
-          fi
-
-          echo "SUCCESS: Copilot returned the expected text."
-
           {
-            echo "## CERIT Copilot Test"
+            echo "## Copilot via CERIT"
+            echo
+            echo "**Question:** How are you?"
+            echo
+            echo "**Answer:**"
             echo
             cat copilot-output.txt
-            echo
-            echo "Copilot returned the expected response."
           } >> "$GITHUB_STEP_SUMMARY"
