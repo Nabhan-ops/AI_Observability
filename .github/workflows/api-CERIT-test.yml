@@ -34,8 +34,22 @@ jobs:
           echo "CERIT response:"
           cat copilot-output.txt
 
+          if [ ! -s copilot-output.txt ]; then
+            echo "ERROR: Copilot returned an empty response."
+            exit 1
+          fi
+
+          if ! grep -Fq "CERIT API test successful." copilot-output.txt; then
+            echo "ERROR: Expected response was not found."
+            exit 1
+          fi
+
+          echo "SUCCESS: Expected model response received."
+
           {
             echo "## CERIT BYOK Test"
             echo
             cat copilot-output.txt
+            echo
+            echo "Test passed: expected response received."
           } >> "$GITHUB_STEP_SUMMARY"
