@@ -7,15 +7,36 @@ on:
 jobs:
   test-ollama:
     runs-on: self-hosted
+    timeout-minutes: 10
 
     steps:
-      - name: Check Ollama is available
+      - name: Step 1 - Check runner and Python
         run: |
-          curl -fsS http://localhost:11434/api/tags
+          echo "Runner is working!"
+          echo "Python version:"
+          python3 --version
 
-      - name: Ask local model a question
+      - name: Step 2 - Check Ollama connection
         run: |
-          curl -fsS http://localhost:11434/api/chat \
+          echo "Checking local Ollama..."
+          curl --max-time 10 -fsS http://localhost:11434/api/tags
+          echo ""
+          echo "Ollama is responding!"
+
+      - name: Step 3 - Check model
+        run: |
+          echo "Checking llama3.2:1b..."
+          ollama list
+          echo "Model check complete!"
+
+      - name: Step 4 - Ask the AI
+        run: |
+          echo "Sending question to llama3.2:1b..."
+          echo "Waiting for the AI response..."
+          START=$(date +%s)
+
+          curl --max-time 180 -fsS \
+            http://localhost:11434/api/chat \
             -H "Content-Type: application/json" \
             -d '{
               "model": "llama3.2:1b",
@@ -26,5 +47,14 @@ jobs:
                 }
               ],
               "stream": false
-            }' | python3 -c \
-            'import json,sys; print(json.load(sys.stdin)["message"]["content"])'
+            }' |
+            python3 -u -c '
+          import json, sys
+          result = json.load(sys.stdin)
+          print("AI response:", result["message"]["content"], flush=True)
+          print("Model:", result.get("model"), flush=True)
+          print("Total duration:", result.get("total_duration", 0) / 1e9, "seconds", flush=True)
+          '
+
+          END=$(date +%s)
+          echo "Request finished in $((END - START)) seconds."
