@@ -1,1 +1,59 @@
 
+
+name: Test Jev Ontology Decisions
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test-jev:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Call Jev API
+        env:
+          JEV_API_KEY: ${{ secrets.JEV_API_KEY }}
+        run: |
+          set -euo pipefail
+
+          response=$(curl --fail-with-body --silent --show-error \
+            https://jevmodel.net/v1/systemone \
+            -H "Authorization: Bearer $JEV_API_KEY" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "model": "jev-latest",
+              "state": {
+                "proposed_relationship": "video-service CALLS workflow-engine",
+                "evidence": "README.md says: video-service sends transcription requests to workflow-engine."
+              },
+              "questions": {
+                "supported": {
+                  "type": "noul",
+                  "instructions": "Does the evidence support the proposed relationship?",
+                  "criteria": {
+                    "true": "The evidence directly supports the relationship.",
+                    "false": "The evidence does not directly support the relationship."
+                  }
+                },
+                "classification": {
+                  "type": "choice",
+                  "instructions": "Classify the relationship based on the evidence.",
+                  "criteria": {
+                    "supported": "The evidence directly supports the relationship.",
+                    "contradicted": "The evidence contradicts the relationship.",
+                    "unclear": "The evidence is insufficient to decide."
+                  }
+                },
+                "evidence_strength": {
+                  "type": "score",
+                  "instructions": "Rate the strength of the evidence.",
+                  "criteria": [
+                    "No supporting evidence",
+                    "Weak or indirect evidence",
+                    "Clear direct evidence"
+                  ]
+                }
+              }
+            }')
+
+          echo "$response" | jq .
