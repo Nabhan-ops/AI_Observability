@@ -1,3 +1,4 @@
+
 name: Test Jev Ontology Decisions
 
 on:
@@ -14,15 +15,16 @@ jobs:
         run: |
           set -euo pipefail
 
+          # Send a request to TypeSafe's Jev model.
           response=$(curl --fail-with-body --silent --show-error \
-            https://jevmodel.net/v1/systemone \
+            https://api.typesafe.ai/v1/systemone \
             -H "Authorization: Bearer $JEV_API_KEY" \
             -H "Content-Type: application/json" \
             -d '{
               "model": "jev-latest",
               "state": {
                 "proposed_relationship": "video-service CALLS workflow-engine",
-                "evidence": "README.md says: video-service sends transcription requests to workflow-engine."
+                "evidence": "The README explicitly states: video-service sends transcription requests to workflow-engine."
               },
               "questions": {
                 "supported": {
@@ -35,10 +37,10 @@ jobs:
                 },
                 "classification": {
                   "type": "choice",
-                  "instructions": "Classify the relationship based on the evidence.",
+                  "instructions": "Classify the relationship based on the supplied evidence.",
                   "criteria": {
                     "supported": "The evidence directly supports the relationship.",
-                    "contradicted": "The evidence contradicts the relationship.",
+                    "contradicted": "The evidence directly contradicts the relationship.",
                     "unclear": "The evidence is insufficient to decide."
                   }
                 },
@@ -54,4 +56,15 @@ jobs:
               }
             }')
 
+          # Print Jev's actual response.
           echo "$response" | jq .
+
+          # Display each decision separately.
+          echo "Noul probability:"
+          echo "$response" | jq '.answers.supported.noul'
+
+          echo "Choice decision:"
+          echo "$response" | jq '.answers.classification.choice'
+
+          echo "Evidence score:"
+          echo "$response" | jq '.answers.evidence_strength.score'
