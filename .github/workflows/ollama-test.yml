@@ -1,0 +1,30 @@
+
+name: Test Local Ollama
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test-ollama:
+    runs-on: self-hosted
+
+    steps:
+      - name: Check Ollama is available
+        run: |
+          curl -fsS http://localhost:11434/api/tags
+
+      - name: Ask local model a question
+        run: |
+          curl -fsS http://localhost:11434/api/chat \
+            -H "Content-Type: application/json" \
+            -d '{
+              "model": "llama3.2:1b",
+              "messages": [
+                {
+                  "role": "user",
+                  "content": "What is 2 + 2? Reply with the answer only."
+                }
+              ],
+              "stream": false
+            }' | python3 -c \
+            'import json,sys; print(json.load(sys.stdin)["message"]["content"])'
